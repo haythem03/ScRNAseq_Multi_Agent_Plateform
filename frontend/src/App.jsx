@@ -32,7 +32,8 @@ function App() {
                         setCompletedSteps(Object.keys(res.data.result?.steps || {}));
                         setCurrentStep(null);
                         setIsRunning(false);
-                        setView('results');
+                        console.log("Analysis completed successfully");
+                        // setView('results'); // Optional: don't force view change
 
                         // Fetch plots
                         try {
@@ -59,14 +60,14 @@ function App() {
     const handleUploadComplete = (data) => {
         setTaskId(data.task_id);
         setFileId(data.file_id);
+        console.log("Upload complete. FileID:", data.file_id);
         setIsRunning(true);
         setCurrentStep('qc');
         setView('pipeline');
     };
 
     const handleStartFullPipeline = async (config) => {
-        if (!fileId) return;
-
+        console.log("Starting full pipeline for FileID:", fileId);
         try {
             const res = await axios.post(`${API_URL}/pipeline/start?file_id=${fileId}`, config);
             setTaskId(res.data.task_id);

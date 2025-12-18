@@ -122,7 +122,7 @@ export default function Upload({ onUploadComplete, onQCComplete }) {
         <input
           type="file"
           onChange={handleFileChange}
-          accept=".h5ad,.csv,.h5,.loom,.mtx"
+          accept=".h5ad,.csv,.h5,.loom,.mtx,.txt"
           style={{ display: 'none' }}
           id="file-upload"
         />
@@ -145,7 +145,7 @@ export default function Upload({ onUploadComplete, onQCComplete }) {
         )}
 
         <p style={{ color: 'var(--text-secondary)', marginTop: '1rem', fontSize: '0.9rem' }}>
-          Drag & drop or click to select • Supports: .h5ad, .csv, .h5, .loom, .mtx
+          Drag & drop or click to select • Supports: .h5ad, .csv, .h5, .loom, .mtx, .txt
         </p>
       </div>
 

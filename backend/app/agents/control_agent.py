@@ -12,7 +12,7 @@ class ControlAgent(BaseAgent):
     
     # Configurable thresholds
     DEFAULT_THRESHOLDS = {
-        'min_cells': 100,
+        'min_cells': 1,
         'max_mito_pct': 20.0,
         'min_mito_pct': 0.0,
         'min_genes_per_cell': 200,
@@ -67,9 +67,10 @@ class ControlAgent(BaseAgent):
         n_genes_per_cell = qc_metrics.get('n_genes_by_counts', [])
         
         # Check cell count
+        if n_cells < 100:
+            warnings.append(f"Low cell count: {n_cells}. Analysis may not be statistically meaningful.")
         if n_cells < self.thresholds['min_cells']:
-            issues.append(f"Too few cells: {n_cells} < {self.thresholds['min_cells']}. "
-                         "Analysis may not be statistically meaningful.")
+            issues.append(f"Not enough cells to proceed: {n_cells}")
         
         # Check mitochondrial percentage distribution
         if pct_mito:

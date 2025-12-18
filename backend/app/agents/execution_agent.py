@@ -60,10 +60,16 @@ class ExecutionAgent(BaseAgent):
                 df_preview = pd.read_csv(file_path, nrows=5, index_col=0)
                 # Heuristic: if many numeric columns, genes are likely columns
                 self.adata = sc.read_csv(file_path)
-                # Transpose if needed (genes should be in var)
-                if self.adata.n_vars < self.adata.n_obs:
-                    self.log("Transposing data: detected genes as observations")
-                    self.adata = self.adata.T
+            elif file_path.endswith('.txt'):
+                # Handle .txt files - auto-detect delimiter (tab or comma)
+                self.log("Loading .txt file, auto-detecting delimiter")
+                try:
+                    # Try tab-delimited first (most common for scRNA-seq)
+                    df = pd.read_csv(file_path, sep='\t', index_col=0)
+                except:
+                    # Fallback to comma
+                    df = pd.read_csv(file_path, sep=',', index_col=0)
+                self.adata = sc.AnnData(df)
             elif file_path.endswith('.loom'):
                 self.adata = sc.read_loom(file_path)
             elif file_path.endswith('.h5'):
@@ -174,7 +180,7 @@ class ExecutionAgent(BaseAgent):
                 }
             }
             
-            self.log(f"Filtered: {before_cells} → {self.adata.n_obs} cells, {before_genes} → {self.adata.n_vars} genes")
+            self.log(f"Filtered: {before_cells} -> {self.adata.n_obs} cells, {before_genes} -> {self.adata.n_vars} genes")
             return {"status": "success", "data": results}
             
         except Exception as e:
