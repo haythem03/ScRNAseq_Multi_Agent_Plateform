@@ -27,13 +27,19 @@ function App() {
                 try {
                     const res = await axios.get(`${API_URL}/status/${taskId}`);
 
-                    if (res.data.status === 'SUCCESS') {
-                        setPipelineResults(res.data.result);
-                        setCompletedSteps(Object.keys(res.data.result?.steps || {}));
+                    if (res.data.status === 'SUCCESS' || res.data.status === 'COMPLETED') {
+                        const result = res.data.result;
+                        setPipelineResults(result);
+
+                        // Extract completed steps
+                        const steps = Object.keys(result?.steps || {});
+                        // Ensure 'qc' is included if it was previously done
+                        const allCompleted = [...new Set([...completedSteps, ...steps])];
+                        setCompletedSteps(allCompleted);
+
                         setCurrentStep(null);
                         setIsRunning(false);
-                        console.log("Analysis completed successfully");
-                        // setView('results'); // Optional: don't force view change
+                        console.log("Analysis completed. Steps:", allCompleted);
 
                         // Fetch plots
                         try {
@@ -42,12 +48,17 @@ function App() {
                         } catch (e) {
                             console.log('Could not fetch plots');
                         }
-                    } else if (res.data.status === 'FAILURE') {
+                    } else if (res.data.status === 'FAILURE' || res.data.status === 'ERROR') {
+                        console.error("Pipeline failed:", res.data.error);
                         setIsRunning(false);
                         setCurrentStep(null);
-                    } else if (res.data.status === 'PROGRESS') {
+                    } else if (res.data.status === 'PROGRESS' || res.data.status === 'RUNNING') {
                         const progress = res.data.progress || {};
                         setCurrentStep(progress.step_name || progress.step);
+                        // Update completed steps from progress if available
+                        if (res.data.result?.steps) {
+                            setCompletedSteps(Object.keys(res.data.result.steps));
+                        }
                     }
                 } catch (err) {
                     console.error("Polling error", err);

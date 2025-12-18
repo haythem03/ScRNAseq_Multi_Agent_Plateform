@@ -2,10 +2,10 @@ import React, { useState } from 'react';
 
 const DEFAULT_CONFIG = {
     filter: {
-        min_genes: 200,
+        min_genes: 5,
         max_genes: 5000,
         max_mito_pct: 20,
-        min_cells_per_gene: 3
+        min_cells_per_gene: 1
     },
     normalize: { method: 'log_normalize' },
     hvg: { n_top_genes: 2000 },
@@ -59,6 +59,13 @@ export default function PipelineConfig({ onConfigChange, onStartPipeline }) {
                     min={0}
                 />
                 <ConfigField
+                    label="Min Cells/Gene"
+                    value={config.filter.min_cells_per_gene}
+                    onChange={(v) => handleChange('filter', 'min_cells_per_gene', Number(v))}
+                    type="number"
+                    min={0}
+                />
+                <ConfigField
                     label="Cluster Resolution"
                     value={config.cluster.resolution}
                     onChange={(v) => handleChange('cluster', 'resolution', Number(v))}
@@ -104,12 +111,6 @@ export default function PipelineConfig({ onConfigChange, onStartPipeline }) {
                             label="Max Genes"
                             value={config.filter.max_genes}
                             onChange={(v) => handleChange('filter', 'max_genes', Number(v))}
-                            type="number"
-                        />
-                        <ConfigField
-                            label="Min Cells/Gene"
-                            value={config.filter.min_cells_per_gene}
-                            onChange={(v) => handleChange('filter', 'min_cells_per_gene', Number(v))}
                             type="number"
                         />
                     </div>

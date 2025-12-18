@@ -129,9 +129,13 @@ class ProgramManager(BaseAgent):
             "status": "completed",
             "step": "qc",
             "file": file_path,
-            "qc_results": qc_result,
-            "validation": validation,
-            "plots": viz_result.get("plots", {}),
+            "steps": {
+                "qc": {
+                    "result": qc_result,
+                    "validation": validation,
+                    "plots": viz_result.get("plots", {})
+                }
+            },
             "recommendations": validation.get("recommendation", {})
         }
 
