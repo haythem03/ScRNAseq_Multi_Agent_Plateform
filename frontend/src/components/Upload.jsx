@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { collectBase64Plots, prettifyPlotLabel } from '../utils/plotUtils';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
@@ -91,6 +92,8 @@ export default function Upload({ onUploadComplete, onQCComplete }) {
     }
     return () => clearInterval(interval);
   }, [status, taskId]);
+
+  const qcPlotEntries = result ? Object.entries(collectBase64Plots(result, 'qc')) : [];
 
   const formatFileSize = (bytes) => {
     if (bytes < 1024) return bytes + ' B';
@@ -285,6 +288,39 @@ export default function Upload({ onUploadComplete, onQCComplete }) {
               <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
                 Navigate to the <strong>Pipeline</strong> tab to configure and run the full analysis.
               </p>
+
+              {qcPlotEntries.length > 0 && (
+                <div style={{ marginTop: '1.5rem' }}>
+                  <h4 style={{ marginBottom: '0.75rem' }}>📊 QC Visualizations</h4>
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                    gap: '1rem'
+                  }}>
+                    {qcPlotEntries.map(([key, value]) => (
+                      <div key={key} style={{
+                        background: 'var(--bg-secondary)',
+                        borderRadius: '10px',
+                        padding: '0.75rem',
+                        boxShadow: '0 4px 10px rgba(0,0,0,0.2)'
+                      }}>
+                        <p style={{
+                          margin: '0 0 0.5rem',
+                          fontSize: '0.9rem',
+                          color: 'var(--text-secondary)'
+                        }}>
+                          {prettifyPlotLabel(key)}
+                        </p>
+                        <img
+                          src={`data:image/png;base64,${value}`}
+                          alt={prettifyPlotLabel(key)}
+                          style={{ maxWidth: '100%', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </>
           )}
 

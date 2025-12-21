@@ -1,14 +1,34 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+import { collectBase64Plots, prettifyPlotLabel } from '../utils/plotUtils';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
 const TABS = [
     { id: 'qc', name: 'Quality Control', icon: '📊' },
     { id: 'cluster', name: 'Clustering', icon: '🎯' },
     { id: 'markers', name: 'Markers', icon: '🏷️' },
     { id: 'annotation', name: 'Cell Types', icon: '📝' },
+    { id: 'files', name: 'Data Files', icon: '📁' },
 ];
 
 export default function ResultsExplorer({ results, plots }) {
     const [activeTab, setActiveTab] = useState('qc');
+    const [checkpoints, setCheckpoints] = useState([]);
+    const [visualizationFiles, setVisualizationFiles] = useState([]);
+    const [selectedFile, setSelectedFile] = useState(null);
+    const [fileViz, setFileViz] = useState(null);
+    const [vizLoading, setVizLoading] = useState(false);
+
+    // Fetch available checkpoint files and visualization images
+    useEffect(() => {
+        axios.get(`${API_URL}/checkpoints`)
+            .then(res => setCheckpoints(res.data.checkpoints || []))
+            .catch(() => setCheckpoints([]));
+        axios.get(`${API_URL}/visualizations`)
+            .then(res => setVisualizationFiles(res.data.files || []))
+            .catch(() => setVisualizationFiles([]));
+    }, [results]);
 
     if (!results) {
         return (
@@ -18,9 +38,26 @@ export default function ResultsExplorer({ results, plots }) {
         );
     }
 
+    const qcPlotsFromResults = collectBase64Plots(results, 'qc');
+    const qcPlotsFromProps = collectBase64Plots({ plots }, 'qc');
+    const qcPlotEntries = Object.entries({ ...qcPlotsFromResults, ...qcPlotsFromProps });
+
+    // Collect all plots from all steps for easy access
+    const allPlots = { ...plots };
+    if (results.steps) {
+        Object.entries(results.steps).forEach(([stepName, stepData]) => {
+            if (stepData.plot) allPlots[stepName] = stepData.plot;
+            if (stepData.plots) allPlots[stepName] = stepData.plots;
+        });
+    }
+    if (results.plots) {
+        Object.entries(results.plots).forEach(([key, value]) => {
+            allPlots[key] = value;
+        });
+    }
+
     const renderQCTab = () => {
         const qcData = results.steps?.qc?.result?.data || results.qc_results?.data;
-        const qcPlots = plots?.qc || results.plots || {};
 
         return (
             <div>
@@ -40,26 +77,41 @@ export default function ResultsExplorer({ results, plots }) {
                     </div>
                 )}
 
-                {qcPlots.qc_violin && (
+                {qcPlotEntries.length > 0 && (
                     <div style={{ marginBottom: '1.5rem' }}>
-                        <h5>QC Violin Plots</h5>
-                        <img
-                            src={`data:image/png;base64,${qcPlots.qc_violin}`}
-                            alt="QC Violin Plots"
-                            style={{ maxWidth: '100%', borderRadius: '8px' }}
-                        />
+                        <h5 style={{ marginBottom: '0.75rem' }}>QC Visualizations</h5>
+                        <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                            gap: '1rem'
+                        }}>
+                            {qcPlotEntries.map(([key, value]) => (
+                                <div key={key} style={{
+                                    background: 'var(--bg-secondary)',
+                                    borderRadius: '10px',
+                                    padding: '0.75rem',
+                                    boxShadow: '0 4px 10px rgba(0,0,0,0.2)'
+                                }}>
+                                    <p style={{
+                                        margin: '0 0 0.5rem',
+                                        fontSize: '0.9rem',
+                                        color: 'var(--text-secondary)'
+                                    }}>
+                                        {prettifyPlotLabel(key)}
+                                    </p>
+                                    <img
+                                        src={`data:image/png;base64,${value}`}
+                                        alt={prettifyPlotLabel(key)}
+                                        style={{ maxWidth: '100%', borderRadius: '8px' }}
+                                    />
+                                </div>
+                            ))}
+                        </div>
                     </div>
                 )}
 
-                {qcPlots.qc_scatter && (
-                    <div>
-                        <h5>Genes vs Counts</h5>
-                        <img
-                            src={`data:image/png;base64,${qcPlots.qc_scatter}`}
-                            alt="QC Scatter Plot"
-                            style={{ maxWidth: '100%', borderRadius: '8px' }}
-                        />
-                    </div>
+                {!qcData && qcPlotEntries.length === 0 && (
+                    <p style={{ color: 'var(--text-secondary)' }}>No QC data available yet. Run the pipeline first.</p>
                 )}
             </div>
         );
@@ -67,7 +119,8 @@ export default function ResultsExplorer({ results, plots }) {
 
     const renderClusterTab = () => {
         const clusterData = results.steps?.cluster?.result?.data;
-        const umapPlot = plots?.umap || results.steps?.umap?.plot;
+        // Get UMAP plot from multiple possible locations
+        const umapPlot = allPlots.umap || results.steps?.umap?.plot || plots?.umap;
 
         return (
             <div>
@@ -105,15 +158,26 @@ export default function ResultsExplorer({ results, plots }) {
                     </div>
                 )}
 
-                {umapPlot && (
-                    <div>
+                {umapPlot ? (
+                    <div style={{ marginTop: '1.5rem' }}>
                         <h5>UMAP Visualization</h5>
-                        <img
-                            src={`data:image/png;base64,${umapPlot}`}
-                            alt="UMAP Clusters"
-                            style={{ maxWidth: '100%', borderRadius: '8px' }}
-                        />
+                        <div style={{
+                            background: 'var(--bg-secondary)',
+                            borderRadius: '10px',
+                            padding: '1rem',
+                            boxShadow: '0 4px 10px rgba(0,0,0,0.2)'
+                        }}>
+                            <img
+                                src={`data:image/png;base64,${umapPlot}`}
+                                alt="UMAP Clusters"
+                                style={{ maxWidth: '100%', borderRadius: '8px' }}
+                            />
+                        </div>
                     </div>
+                ) : (
+                    <p style={{ color: 'var(--text-secondary)', marginTop: '1rem' }}>
+                        {clusterData ? 'UMAP plot not available yet.' : 'No clustering data available. Run the full pipeline first.'}
+                    </p>
                 )}
             </div>
         );
@@ -225,8 +289,223 @@ export default function ResultsExplorer({ results, plots }) {
             case 'cluster': return renderClusterTab();
             case 'markers': return renderMarkersTab();
             case 'annotation': return renderAnnotationTab();
+            case 'files': return renderFilesTab();
             default: return null;
         }
+    };
+
+    const handleVisualize = async (filename) => {
+        setSelectedFile(filename);
+        setVizLoading(true);
+        try {
+            const res = await axios.get(`${API_URL}/checkpoints/${filename}/visualize`);
+            setFileViz(res.data);
+        } catch (e) {
+            console.error('Failed to visualize file:', e);
+            setFileViz({ error: e.message });
+        }
+        setVizLoading(false);
+    };
+
+    const renderFilesTab = () => {
+
+        return (
+            <div>
+                <h4 style={{ marginTop: 0 }}>Generated Data Files</h4>
+                <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                    Checkpoint files saved during the analysis pipeline. Click "Visualize" to see plots generated from the h5ad file.
+                </p>
+
+                {checkpoints.length > 0 ? (
+                    <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+                        gap: '1rem',
+                        marginBottom: '1.5rem'
+                    }}>
+                        {checkpoints.map((file) => (
+                            <div
+                                key={file.name}
+                                style={{
+                                    padding: '1rem',
+                                    background: selectedFile === file.name ? 'rgba(99, 102, 241, 0.15)' : 'var(--bg-secondary)',
+                                    borderRadius: '10px',
+                                    border: selectedFile === file.name ? '1px solid var(--accent-primary)' : '1px solid transparent',
+                                    boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+                                }}
+                            >
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                    <div>
+                                        <div style={{ fontWeight: 500 }}>📄 {file.name}</div>
+                                        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                                            {file.size_mb} MB • {file.modified}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                    <button
+                                        onClick={() => handleVisualize(file.name)}
+                                        style={{
+                                            padding: '0.4rem 0.8rem',
+                                            background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
+                                            border: 'none',
+                                            borderRadius: '6px',
+                                            color: 'white',
+                                            fontSize: '0.8rem',
+                                            fontWeight: 500,
+                                            cursor: 'pointer'
+                                        }}
+                                    >
+                                        🔬 Visualize
+                                    </button>
+                                    <a
+                                        href={`${API_URL}/checkpoints/${file.name}`}
+                                        download={file.name}
+                                        style={{
+                                            padding: '0.4rem 0.8rem',
+                                            background: 'var(--bg-primary)',
+                                            border: '1px solid var(--glass-border)',
+                                            borderRadius: '6px',
+                                            color: 'var(--text-primary)',
+                                            textDecoration: 'none',
+                                            fontSize: '0.8rem',
+                                            fontWeight: 500
+                                        }}
+                                    >
+                                        ⬇️ Download
+                                    </a>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                ) : (
+                    <p style={{ color: 'var(--text-secondary)' }}>
+                        No checkpoint files available yet. Run the pipeline to generate data files.
+                    </p>
+                )}
+
+                {/* PNG Visualization Files */}
+                {visualizationFiles.length > 0 && (
+                    <div style={{ marginBottom: '2rem' }}>
+                        <h5 style={{ marginBottom: '0.75rem' }}>📊 Generated Plots</h5>
+                        <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                            gap: '1rem'
+                        }}>
+                            {visualizationFiles.map((file) => (
+                                <div key={file.name} style={{
+                                    background: 'var(--bg-secondary)',
+                                    borderRadius: '10px',
+                                    padding: '0.75rem',
+                                    boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+                                }}>
+                                    <p style={{ margin: '0 0 0.5rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                        {file.name.replace('.png', '').replace(/_/g, ' ')}
+                                    </p>
+                                    <img
+                                        src={`${API_URL}/visualizations/${file.name}`}
+                                        alt={file.name}
+                                        style={{ maxWidth: '100%', borderRadius: '8px' }}
+                                    />
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {vizLoading && (
+                    <div style={{ textAlign: 'center', padding: '2rem' }}>
+                        <div style={{ fontSize: '2rem', animation: 'spin 1s linear infinite' }}>🔬</div>
+                        <p>Generating visualizations from {selectedFile}...</p>
+                        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+                    </div>
+                )}
+
+                {fileViz && !vizLoading && (
+                    <div style={{ marginTop: '1rem', animation: 'fadeIn 0.3s' }}>
+                        <h5 style={{ marginBottom: '0.5rem' }}>
+                            📊 Visualization: {selectedFile}
+                        </h5>
+                        
+                        {fileViz.error ? (
+                            <div style={{ color: 'var(--error)', padding: '1rem', background: 'rgba(239,68,68,0.1)', borderRadius: '8px' }}>
+                                Error: {fileViz.error}
+                            </div>
+                        ) : (
+                            <>
+                                {/* File Info */}
+                                <div style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))',
+                                    gap: '0.75rem',
+                                    marginBottom: '1.5rem'
+                                }}>
+                                    <MetricCard label="Cells" value={fileViz.info?.n_cells?.toLocaleString()} />
+                                    <MetricCard label="Genes" value={fileViz.info?.n_genes?.toLocaleString()} />
+                                    {fileViz.info?.n_clusters && <MetricCard label="Clusters" value={fileViz.info.n_clusters} />}
+                                </div>
+
+                                {/* Plots */}
+                                <div style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+                                    gap: '1rem'
+                                }}>
+                                    {fileViz.plots?.umap && (
+                                        <div style={{ background: 'var(--bg-secondary)', borderRadius: '10px', padding: '1rem' }}>
+                                            <h6 style={{ margin: '0 0 0.5rem', color: 'var(--text-secondary)' }}>UMAP Embedding</h6>
+                                            <img
+                                                src={`data:image/png;base64,${fileViz.plots.umap}`}
+                                                alt="UMAP"
+                                                style={{ maxWidth: '100%', borderRadius: '8px' }}
+                                            />
+                                        </div>
+                                    )}
+                                    {fileViz.plots?.pca && (
+                                        <div style={{ background: 'var(--bg-secondary)', borderRadius: '10px', padding: '1rem' }}>
+                                            <h6 style={{ margin: '0 0 0.5rem', color: 'var(--text-secondary)' }}>PCA</h6>
+                                            <img
+                                                src={`data:image/png;base64,${fileViz.plots.pca}`}
+                                                alt="PCA"
+                                                style={{ maxWidth: '100%', borderRadius: '8px' }}
+                                            />
+                                        </div>
+                                    )}
+                                    {fileViz.plots?.qc_violin && (
+                                        <div style={{ background: 'var(--bg-secondary)', borderRadius: '10px', padding: '1rem', gridColumn: 'span 2' }}>
+                                            <h6 style={{ margin: '0 0 0.5rem', color: 'var(--text-secondary)' }}>QC Metrics</h6>
+                                            <img
+                                                src={`data:image/png;base64,${fileViz.plots.qc_violin}`}
+                                                alt="QC Violin"
+                                                style={{ maxWidth: '100%', borderRadius: '8px' }}
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+
+                                {Object.keys(fileViz.plots || {}).length === 0 && (
+                                    <p style={{ color: 'var(--text-secondary)' }}>
+                                        No visualizations available for this checkpoint. It may not contain UMAP/PCA embeddings yet.
+                                    </p>
+                                )}
+
+                                {/* Data Structure Info */}
+                                <div style={{ marginTop: '1.5rem' }}>
+                                    <h6 style={{ color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>Data Structure</h6>
+                                    <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                        <div><strong>obs columns:</strong> {fileViz.info?.obs_columns?.join(', ') || 'None'}</div>
+                                        <div><strong>obsm keys:</strong> {fileViz.info?.obsm_keys?.join(', ') || 'None'}</div>
+                                        <div><strong>layers:</strong> {fileViz.info?.layers?.join(', ') || 'None'}</div>
+                                    </div>
+                                </div>
+                            </>
+                        )}
+                        <style>{`@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }`}</style>
+                    </div>
+                )}
+            </div>
+        );
     };
 
     return (

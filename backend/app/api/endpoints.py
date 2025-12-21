@@ -3,11 +3,12 @@ API Endpoints for the scRNA-seq platform.
 Supports both async (Celery) and background-sync execution modes.
 """
 from fastapi import APIRouter, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, Body, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 import shutil
 import os
 import uuid
 import json
+from datetime import datetime
 from typing import Optional
 from app.agents.program_manager import ProgramManager
 
@@ -15,7 +16,9 @@ router = APIRouter()
 
 # Use local data directory for Windows compatibility
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "uploads")
+CHECKPOINT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "checkpoints")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
 # Store results for background-sync mode
 sync_results: dict = {}
@@ -248,3 +251,260 @@ def get_execution_mode():
         "mode": "celery" if USE_CELERY else "background-sync",
         "celery_available": USE_CELERY
     }
+
+
+# Visualization directory for PNG files
+VISUALIZATION_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "visualizations")
+os.makedirs(VISUALIZATION_DIR, exist_ok=True)
+
+@router.get("/checkpoints")
+def list_checkpoints():
+    """List all available checkpoint files."""
+    if not os.path.exists(CHECKPOINT_DIR):
+        return {"checkpoints": []}
+    
+    files = []
+    for filename in os.listdir(CHECKPOINT_DIR):
+        if filename.endswith('.h5ad'):
+            filepath = os.path.join(CHECKPOINT_DIR, filename)
+            stat = os.stat(filepath)
+            files.append({
+                "name": filename,
+                "size_mb": round(stat.st_size / (1024 * 1024), 2),
+                "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
+            })
+    
+    # Sort by modification time (newest first)
+    files.sort(key=lambda x: x["modified"], reverse=True)
+    return {"checkpoints": files}
+
+
+@router.get("/visualizations")
+def list_visualizations():
+    """List all available visualization PNG files."""
+    if not os.path.exists(VISUALIZATION_DIR):
+        return {"files": []}
+    
+    files = []
+    for filename in os.listdir(VISUALIZATION_DIR):
+        if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.svg')):
+            filepath = os.path.join(VISUALIZATION_DIR, filename)
+            stat = os.stat(filepath)
+            files.append({
+                "name": filename,
+                "size_kb": round(stat.st_size / 1024, 2),
+                "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
+            })
+    
+    # Sort by modification time (newest first)
+    files.sort(key=lambda x: x["modified"], reverse=True)
+    return {"files": files}
+
+
+@router.get("/visualizations/{filename}")
+def get_visualization(filename: str):
+    """Serve a visualization image file."""
+    # Sanitize filename to prevent directory traversal
+    safe_filename = os.path.basename(filename)
+    filepath = os.path.join(VISUALIZATION_DIR, safe_filename)
+    
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail=f"Visualization file not found: {safe_filename}")
+    
+    # Determine media type
+    ext = os.path.splitext(safe_filename)[1].lower()
+    media_types = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml'}
+    media_type = media_types.get(ext, 'application/octet-stream')
+    
+    return FileResponse(path=filepath, media_type=media_type)
+
+
+@router.get("/checkpoints/{filename}")
+def download_checkpoint(filename: str):
+    """Download a specific checkpoint file."""
+    # Sanitize filename to prevent directory traversal
+    safe_filename = os.path.basename(filename)
+    filepath = os.path.join(CHECKPOINT_DIR, safe_filename)
+    
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail=f"Checkpoint file not found: {safe_filename}")
+    
+    return FileResponse(
+        path=filepath,
+        filename=safe_filename,
+        media_type="application/octet-stream"
+    )
+
+
+@router.get("/checkpoints/{filename}/visualize")
+def visualize_checkpoint(filename: str):
+    """Generate visualizations from a checkpoint h5ad file using scanpy."""
+    import scanpy as sc
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import base64
+    from io import BytesIO
+    
+    safe_filename = os.path.basename(filename)
+    filepath = os.path.join(CHECKPOINT_DIR, safe_filename)
+    
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail=f"Checkpoint file not found: {safe_filename}")
+    
+    try:
+        adata = sc.read_h5ad(filepath)
+        plots = {}
+        
+        # Generate UMAP plot if coordinates exist
+        if 'X_umap' in adata.obsm:
+            fig, ax = plt.subplots(figsize=(10, 8))
+            fig.patch.set_facecolor('#1e293b')
+            ax.set_facecolor('#0f172a')
+            
+            # Color by clusters if available
+            if 'clusters' in adata.obs.columns:
+                import numpy as np
+                clusters = adata.obs['clusters'].astype('category')
+                n_clusters = len(clusters.cat.categories)
+                colors = plt.cm.tab20(np.linspace(0, 1, max(n_clusters, 20)))
+                
+                for i, cat in enumerate(clusters.cat.categories):
+                    mask = clusters == cat
+                    ax.scatter(
+                        adata.obsm['X_umap'][mask, 0],
+                        adata.obsm['X_umap'][mask, 1],
+                        c=[colors[i % 20]],
+                        label=f'Cluster {cat}',
+                        s=15,
+                        alpha=0.7
+                    )
+                ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', 
+                         facecolor='#1e293b', labelcolor='#f8fafc')
+            else:
+                ax.scatter(
+                    adata.obsm['X_umap'][:, 0],
+                    adata.obsm['X_umap'][:, 1],
+                    c='#6366f1',
+                    s=15,
+                    alpha=0.7
+                )
+            
+            ax.set_xlabel('UMAP 1', color='#f8fafc')
+            ax.set_ylabel('UMAP 2', color='#f8fafc')
+            ax.set_title(f'UMAP - {safe_filename}', color='#f8fafc', fontsize=14)
+            ax.tick_params(colors='#f8fafc')
+            ax.spines['bottom'].set_color('#f8fafc')
+            ax.spines['left'].set_color('#f8fafc')
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            
+            buf = BytesIO()
+            fig.savefig(buf, format='png', dpi=150, facecolor='#1e293b', bbox_inches='tight')
+            plt.close(fig)
+            buf.seek(0)
+            plots['umap'] = base64.b64encode(buf.read()).decode('utf-8')
+        
+        # Generate PCA plot if coordinates exist
+        if 'X_pca' in adata.obsm:
+            fig, ax = plt.subplots(figsize=(10, 8))
+            fig.patch.set_facecolor('#1e293b')
+            ax.set_facecolor('#0f172a')
+            
+            if 'clusters' in adata.obs.columns:
+                import numpy as np
+                clusters = adata.obs['clusters'].astype('category')
+                n_clusters = len(clusters.cat.categories)
+                colors = plt.cm.tab20(np.linspace(0, 1, max(n_clusters, 20)))
+                
+                for i, cat in enumerate(clusters.cat.categories):
+                    mask = clusters == cat
+                    ax.scatter(
+                        adata.obsm['X_pca'][mask, 0],
+                        adata.obsm['X_pca'][mask, 1],
+                        c=[colors[i % 20]],
+                        label=f'Cluster {cat}',
+                        s=15,
+                        alpha=0.7
+                    )
+            else:
+                ax.scatter(
+                    adata.obsm['X_pca'][:, 0],
+                    adata.obsm['X_pca'][:, 1],
+                    c='#ec4899',
+                    s=15,
+                    alpha=0.7
+                )
+            
+            ax.set_xlabel('PC1', color='#f8fafc')
+            ax.set_ylabel('PC2', color='#f8fafc')
+            ax.set_title(f'PCA - {safe_filename}', color='#f8fafc', fontsize=14)
+            ax.tick_params(colors='#f8fafc')
+            ax.spines['bottom'].set_color('#f8fafc')
+            ax.spines['left'].set_color('#f8fafc')
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            
+            buf = BytesIO()
+            fig.savefig(buf, format='png', dpi=150, facecolor='#1e293b', bbox_inches='tight')
+            plt.close(fig)
+            buf.seek(0)
+            plots['pca'] = base64.b64encode(buf.read()).decode('utf-8')
+        
+        # Generate QC violin plots if QC metrics exist
+        qc_cols = [c for c in adata.obs.columns if c in ['n_genes_by_counts', 'total_counts', 'pct_counts_mt']]
+        if qc_cols:
+            fig, axes = plt.subplots(1, len(qc_cols), figsize=(5 * len(qc_cols), 5))
+            fig.patch.set_facecolor('#1e293b')
+            if len(qc_cols) == 1:
+                axes = [axes]
+            
+            colors = ['#6366f1', '#ec4899', '#10b981']
+            for idx, col in enumerate(qc_cols):
+                ax = axes[idx]
+                ax.set_facecolor('#0f172a')
+                data = adata.obs[col].dropna().values
+                if len(data) > 0:
+                    violin = ax.violinplot(data, showmedians=True)
+                    for pc in violin['bodies']:
+                        pc.set_facecolor(colors[idx % 3])
+                        pc.set_alpha(0.7)
+                    for partname in ['cmedians', 'cmins', 'cmaxes', 'cbars']:
+                        if partname in violin:
+                            violin[partname].set_color('#f8fafc')
+                ax.set_title(col.replace('_', ' ').title(), color='#f8fafc')
+                ax.tick_params(colors='#f8fafc')
+                ax.set_xticks([])
+                ax.spines['bottom'].set_color('#f8fafc')
+                ax.spines['left'].set_color('#f8fafc')
+                ax.spines['top'].set_visible(False)
+                ax.spines['right'].set_visible(False)
+            
+            plt.tight_layout()
+            buf = BytesIO()
+            fig.savefig(buf, format='png', dpi=150, facecolor='#1e293b', bbox_inches='tight')
+            plt.close(fig)
+            buf.seek(0)
+            plots['qc_violin'] = base64.b64encode(buf.read()).decode('utf-8')
+        
+        # Get summary info
+        info = {
+            "n_cells": int(adata.n_obs),
+            "n_genes": int(adata.n_vars),
+            "obs_columns": list(adata.obs.columns),
+            "var_columns": list(adata.var.columns),
+            "obsm_keys": list(adata.obsm.keys()),
+            "layers": list(adata.layers.keys()) if adata.layers else [],
+            "uns_keys": list(adata.uns.keys()) if adata.uns else []
+        }
+        
+        if 'clusters' in adata.obs.columns:
+            info["n_clusters"] = int(adata.obs['clusters'].nunique())
+            info["cluster_sizes"] = adata.obs['clusters'].value_counts().to_dict()
+        
+        return {"status": "success", "filename": safe_filename, "info": info, "plots": plots}
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error visualizing file: {str(e)}")

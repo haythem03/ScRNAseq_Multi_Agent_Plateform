@@ -40,10 +40,12 @@ class ProgramManager(BaseAgent):
     
     def __init__(self):
         super().__init__(agent_id="PM-001", name="Program Manager")
-        self.execution_agent = ExecutionAgent()
-        self.visualization_agent = VisualizationAgent()
-        self.control_agent = ControlAgent()
-        self.audit_agent = AuditAgent()
+        # Instantiate agent references lazily so tests can patch classes
+        # before the first instantiation.
+        self.execution_agent = None
+        self.visualization_agent = None
+        self.control_agent = None
+        self.audit_agent = None
         self.pipeline_state = {}
         self.current_step_index = 0
     
@@ -70,6 +72,16 @@ class ProgramManager(BaseAgent):
         file_path = payload.get("file_path")
         self.log(f"Planning QC for file: {file_path}")
         
+        # Ensure agents exist (lazy instantiation)
+        if self.audit_agent is None:
+            self.audit_agent = AuditAgent()
+        if self.execution_agent is None:
+            self.execution_agent = ExecutionAgent()
+        if self.control_agent is None:
+            self.control_agent = ControlAgent()
+        if self.visualization_agent is None:
+            self.visualization_agent = VisualizationAgent()
+
         # Start audit
         self.audit_agent.execute({
             "action": "start_run",
@@ -125,15 +137,20 @@ class ProgramManager(BaseAgent):
         }
         self.current_step_index = 1
         
+        # Get plots from viz_result
+        qc_plots = viz_result.get("plots", {})
+        
         return {
             "status": "completed",
             "step": "qc",
             "file": file_path,
+            "qc_results": qc_result,
+            "plots": {"qc": qc_plots},  # Top-level plots for easy frontend access
             "steps": {
                 "qc": {
                     "result": qc_result,
                     "validation": validation,
-                    "plots": viz_result.get("plots", {})
+                    "plots": qc_plots
                 }
             },
             "recommendations": validation.get("recommendation", {})
@@ -145,7 +162,17 @@ class ProgramManager(BaseAgent):
         config = payload.get("config", self.DEFAULT_PIPELINE_CONFIG.copy())
         
         self.log("Starting full pipeline execution")
-        results = {"steps": {}, "status": "running"}
+        results = {"steps": {}, "status": "running", "plots": {}}
+        
+        # Ensure agents exist (lazy instantiation)
+        if self.audit_agent is None:
+            self.audit_agent = AuditAgent()
+        if self.execution_agent is None:
+            self.execution_agent = ExecutionAgent()
+        if self.control_agent is None:
+            self.control_agent = ControlAgent()
+        if self.visualization_agent is None:
+            self.visualization_agent = VisualizationAgent()
         
         # Start audit
         self.audit_agent.execute({
@@ -183,11 +210,13 @@ class ProgramManager(BaseAgent):
                 "qc_data": qc_data.get("qc_plots", {})
             })
             
+            qc_plots = viz_result.get("plots", {})
             results["steps"]["qc"] = {
                 "result": qc_result,
                 "validation": validation,
-                "plots": viz_result.get("plots", {})
+                "plots": qc_plots
             }
+            results["plots"]["qc"] = qc_plots
         
         # Step 2: Filter
         if config.get("filter", {}).get("enabled", True):
@@ -296,7 +325,9 @@ class ProgramManager(BaseAgent):
                 "clusters": cluster_data.get("clusters", [])
             })
             
-            results["steps"]["umap"] = {"result": umap_result, "plot": viz_result.get("plot")}
+            umap_plot = viz_result.get("plot")
+            results["steps"]["umap"] = {"result": umap_result, "plot": umap_plot}
+            results["plots"]["umap"] = umap_plot
         
         # Step 9: Markers
         if config.get("markers", {}).get("enabled", True):

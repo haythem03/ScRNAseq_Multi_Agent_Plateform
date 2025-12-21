@@ -53,8 +53,10 @@ function App() {
                         setIsRunning(false);
                         setCurrentStep(null);
                     } else if (res.data.status === 'PROGRESS' || res.data.status === 'RUNNING') {
-                        const progress = res.data.progress || {};
-                        setCurrentStep(progress.step_name || progress.step);
+                        const progress = res.data.progress;
+                        if (progress?.step_name || progress?.step) {
+                            setCurrentStep(progress.step_name || progress.step);
+                        }
                         // Update completed steps from progress if available
                         if (res.data.result?.steps) {
                             setCompletedSteps(Object.keys(res.data.result.steps));
